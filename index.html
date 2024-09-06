@@ -1,0 +1,56 @@
+$ErrorActionPreference = "Stop"; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Add-Type -Ass PresentationFramework
+
+# 检查当前用户是否属于管理员组
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (!$isAdmin)
+{
+	Write-Host "很遗憾! 电脑当前登陆的用户『$($env:USERNAME)』没有管理员权限, 我无法执行! `n若仍想执行, 请按如下步骤操作:`n`n1.先注销当前用户,选择『Administrator』帐户登陆;`n2.然后执行D盘下名为『__将$($env:USERNAME)用户加入管理员组.bat』的文件;`n3.重启系统,选择『$($env:USERNAME)』用户登陆;`n4.再次尝试在运行框中执行我`n`n20秒后自动退出！"
+	$cmdContent = @"
+%1 mshta vbscript:CreateObject("Shell.Application").ShellExecute("cmd.exe","/c %~s0 ::","","runas",1)(window.close)&&exit
+net localgroup Administrators "$env:USERNAME" /add
+echo "$env:USERNAME 用户, 已成功添加到管理员组!"
+"@
+	Set-Content -Path "D:\__将$($env:USERNAME)用户加入管理员组.bat" -Value $cmdContent
+    sleep 20
+    exit
+}
+
+$lb = (Get-Volume $env:SystemDrive[0]).FileSystemLabel
+
+# 指定要查找的相对路径
+$relativePath = "__bbwb.xyz__\BAK\WIN\$lb\$lb.sna"
+
+# 获取所有本地盘符
+$drives = Get-PSDrive -PSProvider FileSystem
+
+# 遍历所有盘符，检查指定路径的文件是否存在
+foreach ($drive in $drives)
+{
+	$fullPath = Join-Path $drive.Root $relativePath
+	
+	if (Test-Path $fullPath)
+	{
+		Write-Output "找到文件：$fullPath"
+		$snaPath = $fullPath
+		$snaDir = Join-Path $drive.Root "__bbwb.xyz__\BAK"
+		break
+	}
+}
+
+if ($null -eq $snaPath)
+{
+	[Windows.MessageBox]::Show("未在硬盘上搜索到系统备份! `n`n请准备好备份文件后再次尝试执行我!", "警告", 'OK', 'Warning')
+	return
+}
+
+$_ = $snaDir; if (!$env:Path.Split(';').Contains($_)) { $env:Path = "$_;$env:Path" }
+
+sna "$snaPath" -T
+if (!$?)
+{
+	[Windows.MessageBox]::Show("系统备份文件可能损坏! `n`n请准备好备份文件后再次尝试执行我!", "警告", 'OK', 'Warning')
+	return
+}
+sna --Schedule $env:SystemDrive "$snaPath" --autoreboot:success -W
+
+shutdown /r /t 6
